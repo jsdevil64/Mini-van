@@ -40,31 +40,53 @@ function render(snap){
   const seen=new Set();
   const bounds=[];
 
+  // First collect all active providers and calculate their distance.
+  // Then sort nearest -> farthest before rendering the cards.
+  const providers=[];
+
   snap.forEach(d=>{
     const x=d.data();
     if(String(x.status||'').toLowerCase()!=='active') return;
     // Provider's temporary Stop is separate from the admin-controlled status.
     // Only hide the provider from customers while locationSharing is false.
     if(x.locationSharing === false) return;
+
     const lat=Number(x.latitude), lng=Number(x.longitude);
     if(!Number.isFinite(lat)||!Number.isFinite(lng)) return;
 
-    seen.add(d.id);
+    const distance=customerLocation
+      ? distanceKm(customerLocation.latitude,customerLocation.longitude,lat,lng)
+      : Infinity;
+
+    providers.push({id:d.id,data:x,lat,lng,distance});
+  });
+
+  // Nearest provider first, farthest provider last.
+  providers.sort((a,b)=>a.distance-b.distance);
+
+  providers.forEach(provider=>{
+    const {id,data:x,lat,lng,distance}=provider;
+
+    seen.add(id);
     bounds.push([lat,lng]);
+
     const phone=String(x.whatsapp||x.phone||'').replace(/\D/g,'');
     const wa=phone ? `<a class="whatsapp" target="_blank" rel="noopener" href="https://wa.me/${phone}">💬 WhatsApp</a>` : '';
-    const distance = customerLocation ? `<p class="distance">📏 ${distanceKm(customerLocation.latitude,customerLocation.longitude,lat,lng).toFixed(1)} km away</p>` : `<p class="distance muted">📏 Use my location to see distance</p>`;
-    box.innerHTML+=`<article class="card"><span class="pill">ACTIVE</span><h3>${escapeHtml(x.vehicleNumber||'Vehicle')}</h3><p>${escapeHtml(x.name||'Provider')}</p>${distance}<p>📍 ${lat.toFixed(5)}, ${lng.toFixed(5)}</p>${wa}</article>`;
+    const distanceText=customerLocation
+      ? `<p class="distance">📏 ${distance.toFixed(1)} km away</p>`
+      : `<p class="distance muted">📏 Use my location to see distance</p>`;
+
+    box.innerHTML+=`<article class="card"><span class="pill">ACTIVE</span><h3>${escapeHtml(x.vehicleNumber||'Vehicle')}</h3><p>${escapeHtml(x.name||'Provider')}</p>${distanceText}<p>📍 ${lat.toFixed(5)}, ${lng.toFixed(5)}</p>${wa}</article>`;
 
     if(!map) return;
-    const popup=`<div style="min-width:180px"><strong>${escapeHtml(x.vehicleNumber||'Vehicle')}</strong><br>${escapeHtml(x.name||'Provider')}<br>📍 ${lat.toFixed(5)}, ${lng.toFixed(5)}</div>`;
-    let marker=vehicleMarkers.get(d.id);
+    const popup=`<div style="min-width:180px"><strong>${escapeHtml(x.vehicleNumber||'Vehicle')}</strong><br>${escapeHtml(x.name||'Provider')}<br>${customerLocation ? `📏 ${distance.toFixed(1)} km away<br>` : ''}📍 ${lat.toFixed(5)}, ${lng.toFixed(5)}</div>`;
+    let marker=vehicleMarkers.get(id);
     if(marker){
       marker.setLatLng([lat,lng]);
       marker.setPopupContent(popup);
     }else{
       marker=L.marker([lat,lng]).addTo(map).bindPopup(popup);
-      vehicleMarkers.set(d.id,marker);
+      vehicleMarkers.set(id,marker);
     }
   });
 
@@ -118,3 +140,4 @@ onSnapshot(query(collection(db,'providers'),where('status','==','active')),rende
   status.textContent='Could not load active vehicles from Firebase.';
   status.className='map-status error';
 });
+
